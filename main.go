@@ -2,7 +2,8 @@ package main
 
 import (
 	"fmt"
-	"image"
+  "math"
+	// "image"
 	"image/color"
 	_ "image/png"
 	"log"
@@ -13,14 +14,14 @@ import (
 )
 
 const (
-	screenWidth  = 320
-	screenHeight = 240
+	padding = 30
 
-	frameOX     = 0
-	frameOY     = 0
-	frameWidth  = 37
-	frameHeight = 48
-	frameCount  = 4
+	xTiles   = 7
+	yTiles   = 7
+	tileSize = 32
+
+	screenWidth  = xTiles*tileSize + padding * 2
+	screenHeight = yTiles*tileSize + padding * 2
 )
 
 var (
@@ -29,16 +30,16 @@ var (
 )
 
 type Game struct {
-	keys  []ebiten.Key
-	count int
-	xPos  int
-	yPos  int
+	keys       []ebiten.Key
+	levelMap   [yTiles][xTiles]int // x-val is inner array
+	characterX int
+	characterY int
 }
 
 func init() {
 	var err error
 
-	bombermanImage, _, err = ebitenutil.NewImageFromFile("bomberman.png")
+	bombermanImage, _, err = ebitenutil.NewImageFromFile("main-character.png")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -49,60 +50,83 @@ func init() {
 	}
 }
 
+func (g *Game) init() {
+  g.characterX = 0
+  g.characterY = 0
+}
+
 func (g *Game) Update() error {
-	g.count++
 	g.keys = inpututil.AppendPressedKeys(g.keys[:0])
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Fill(color.RGBA{0x5e, 0x33, 0x19, 0x01})
-	g.drawRocks(screen)
 
 	g.handleKeyPress()
-	g.drawCharacter(screen)
-	ebitenutil.DebugPrint(screen, fmt.Sprintf("x: %v, y: %v", g.xPos, g.yPos))
-}
 
-func (g *Game) drawRocks(screen *ebiten.Image) {
-	for x := 1; x < 7; x += 2 {
-		for y := 0; y < 5; y += 2 {
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(float64(x*32)+screenWidth/4, float64(y*32)+screenHeight/4)
-			op.GeoM.Scale(0.8, 0.8)
-			screen.DrawImage(rockImage, op)
+	for y := 0; y < len(g.levelMap); y++ {
+		for x := 0; x < len(g.levelMap[y]); x++ {
+			if x%2 != 0 && y%2 != 0 {
+				g.drawRock(screen, x, y)
+			}
 		}
 	}
+
+  g.drawCharacter(screen)
+
+	ebitenutil.DebugPrint(screen, fmt.Sprintf("x: %v, y: %v", g.characterX, g.characterY))
+}
+
+func (g *Game) drawRock(screen *ebiten.Image, x int, y int) {
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(float64(x)*tileSize+padding, float64(y)*tileSize+padding)
+	screen.DrawImage(rockImage, op)
 }
 
 func (g *Game) drawCharacter(screen *ebiten.Image) {
 	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(-float64(frameWidth)/2, -float64(frameHeight)/2)
-	op.GeoM.Translate(float64(g.xPos)+screenWidth/2, float64(g.yPos)+screenHeight/2)
-	op.GeoM.Scale(0.5, 0.5)
-	i := (g.count / 7) % frameCount // Update runs every millisecond, 8 is delay between switching frames
-	sx, sy := frameOX+i*frameWidth, frameOY
-	screen.DrawImage(bombermanImage.SubImage(image.Rect(sx, sy, sx+frameWidth, sy+frameHeight)).(*ebiten.Image), op)
+	op.GeoM.Translate(float64(g.characterX)+padding, float64(g.characterY)+padding)
+	screen.DrawImage(bombermanImage, op)
 }
 
 func (g *Game) handleKeyPress() {
-	if len(g.keys) < 1 {
+	if len(g.keys) == 0 {
 		return
-	}
-	// Selecting the first key, prevents diagonal movement
+	}  
+
+  turnBuffer := 10
+  bottomBorder := tileSize * yTiles - 32
+  rightBorder := tileSize * xTiles - 32
+
+  allowMoveHorizontal := g.characterY % 64 > 64 - turnBuffer || g.characterY % 64 < turnBuffer || g.characterY == bottomBorder 
+  allowMoveVertical := g.characterX % 64 > 64 - turnBuffer || g.characterX % 64 < turnBuffer || g.characterX == rightBorder 
+
+	// Selecting the first key prevents diagonal movement
 	pressedKey := g.keys[0]
-	if pressedKey == ebiten.KeyArrowUp && g.yPos > 0 {
-		g.yPos -= 4
+	if pressedKey == ebiten.KeyArrowUp && g.characterY > 0 && allowMoveVertical {
+    if g.characterX % 64 != 0 {
+      g.characterX = 64 * int(math.Round(float64(g.characterX) / 64))
+    }
+    g.characterY -= 2
 	}
-	if pressedKey == ebiten.KeyArrowDown && g.yPos < screenHeight - 40 {
-		g.yPos += 4
+	if pressedKey == ebiten.KeyArrowDown && g.characterY < bottomBorder && allowMoveVertical {
+    if g.characterX % 64 != 0 {
+      g.characterX = 64 * int(math.Round(float64(g.characterX) / 64))
+    }
+    g.characterY += 2
 	}
-	if pressedKey == ebiten.KeyArrowLeft && g.xPos > 0 {
-		g.xPos -= 4
+	if pressedKey == ebiten.KeyArrowLeft && g.characterX > 0 && allowMoveHorizontal {
+    if g.characterY % 64 != 0 {
+      g.characterY = 64 * int(math.Round(float64(g.characterY) / 64))
+    }
+    g.characterX -= 2
 	}
-	if pressedKey == ebiten.KeyArrowRight && g.xPos < screenWidth - 20 && g.yPos > 130 && g.yPos < 170 {
-		g.yPos = 150
-		g.xPos += 4
+	if pressedKey == ebiten.KeyArrowRight && g.characterX < rightBorder && allowMoveHorizontal {
+    if g.characterY % 64 != 0 {
+      g.characterY = 64 * int(math.Round(float64(g.characterY) / 64))
+    }
+    g.characterX += 2
 	}
 }
 
@@ -113,7 +137,11 @@ func (g *Game) Layout(outsideWidth int, outsideHeight int) (int, int) {
 func main() {
 	ebiten.SetWindowSize(screenWidth*2, screenHeight*2)
 	ebiten.SetWindowTitle("Bomberman")
-	if err := ebiten.RunGame(&Game{}); err != nil {
+
+	g := &Game{}
+	g.init()
+
+	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
 }
